@@ -8,6 +8,8 @@ import gpytoolbox
 def get_source_velocity(src, i = 1):
     if src == 'taylorgreen':
         source_func = taylorgreen_velocity
+    elif src =='liddriven':
+        source_func = liddriven_velocity
     elif src == 'karman':
         source_func = karman_vortex_velocity
     elif src == 'jpipe':
@@ -27,16 +29,41 @@ def taylorgreen_velocity(samples: torch.FloatTensor, scene_size=None):
     u = A * torch.sin(a * x) * torch.cos(b * y)
     v = B * torch.cos(a * x) * torch.sin(b * y)
     vel = torch.stack([u, v], dim=-1)
+    print(x.shape)      #N 
+    print(vel.shape)    #N 2
+    return vel
+
+def liddriven_velocity(samples: torch.FloatTensor, scene_size=None):
+    
+    x = ((samples[:, 0]-scene_size[0])/(scene_size[1] - scene_size[0]))
+    y = ((samples[:, 1]-scene_size[2])/(scene_size[3] - scene_size[2]))
+
+    lid_y_area = [0.97,0.98]
+
+    frac = torch.clamp((y - lid_y_area[0]) /
+                                (lid_y_area[1] - lid_y_area[0]),
+                                0.0, 1.0)
+
+
+    mask =  (y > 0.9) & (x > 0.05) 
+    one = torch.ones_like(x)
+    u = torch.where(mask, one, 0) * frac
+    v = torch.zeros_like(x)
+
+    vel = torch.stack([u, v], dim = -1)
     
     return vel
 
 def karman_vortex_velocity(samples: torch.FloatTensor, karman_vel, obs_func, scene_size, eps):
     vel = torch.zeros_like(samples)
+    print('[init vel] ',vel.shape)
     vel[..., 0] = karman_vel
 
     dist = obs_func(samples)
     threshold = eps
     weight = torch.clamp(dist, 0, threshold) / threshold
+
+    #zxc 速度根据到边界的距离而有所压缩
     vel *= weight.unsqueeze(-1)
 
     return vel
