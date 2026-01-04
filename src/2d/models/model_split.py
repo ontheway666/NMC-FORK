@@ -8,6 +8,10 @@ from .networks import get_network
 from utils.diff_ops import curl2d_fdiff, laplace, divergence, jacobian, gradient, curl2d
 from utils.model_utils import sample_uniform_2D, sample_random_2D
 from utils.vis_utils import draw_scalar_field2D, draw_vector_field2D, save_figure, save_figure_nopadding
+from utils.prms import *
+
+import sys
+sys.path.append("/w/nmc/Neural-Monte-Carlo-Fluid-Simulation/bindings/zombie/build/")
 import zombie_bindings
 import json
 import matplotlib.pyplot as plt
@@ -18,6 +22,104 @@ import gpytoolbox
 from torch_cubic_spline_grids import CubicBSplineGrid2d
 
 np.set_printoptions(threshold=sys.maxsize)
+
+# torch.autograd.set_detect_anomaly(True)
+
+sampleNum=None
+outer_mat=None
+def outBCData(mat,width=0.25,onlyOutData=True):
+    global outer_mat
+    global sampleNum
+
+    assert(len(mat.shape)==2 and mat.shape[1]==2)
+    device = mat.device
+    dtype = mat.dtype
+
+    xmin = torch.min(mat[:,0]).item()
+    xmax = torch.max(mat[:,0]).item()
+    ymin = torch.min(mat[:,1]).item()
+    ymax = torch.max(mat[:,1]).item()
+
+   
+
+    area_inner = (xmax - xmin) * (ymax - ymin)
+    
+    density = mat.shape[0] / area_inner
+
+    area_outer = (
+        (xmax - xmin) * 2 * width)
+       
+    
+    num_outer = int(area_outer * density)
+
+    # 为了避免过滤后不够，多采一点
+    oversample = int(num_outer * 1.3)
+    if(not(outer_mat is None) and (sampleNum == mat.shape[0])):
+        pass
+    else:
+        # print('[outBCData] ')
+        # print(xmin, xmax, ymin, ymax)
+
+        # 在大矩形里均匀采样
+        rand = torch.rand(oversample, 2, device=device, dtype=dtype)
+        rand[:, 0] = rand[:, 0] * (xmax - xmin) + xmin
+        rand[:, 1] = rand[:, 1] * (ymax - ymin + 2 * width) + (ymin - width)
+
+        # 过滤掉内部矩形
+        mask_inner = (
+            (rand[:, 0] >= xmin) & (rand[:, 0] <= xmax) &
+            (rand[:, 1] >= ymin) & (rand[:, 1] <= ymax)
+        )
+        outer_mat = rand[~mask_inner]
+        
+        # 截断到目标数量
+        outer_mat = outer_mat[:num_outer]
+
+        #if not, error
+        outer_mat = outer_mat.detach()
+
+        sampleNum = mat.shape[0]
+
+
+
+    if onlyOutData:
+        return outer_mat
+    
+    mat = torch.cat([mat, outer_mat], dim = 0)
+
+    #   optional
+    # perm= torch.randperm(mat.shape[0],device=device) 
+    # mat = mat[perm]
+
+  
+
+    assert(len(mat.shape)==2 and mat.shape[1]==2)
+    return mat
+
+
+def checkTensorNan(mat):
+
+    if isinstance(mat, np.ndarray):
+        mat=torch.as_tensor(mat)
+        # NaN 的个数
+    nan_count = torch.isnan(mat).sum().item()
+
+       # 元素总数
+    total_count = mat.numel()
+
+    # 占比
+    nan_ratio = nan_count / total_count
+    print('[Tensor check] ')
+
+
+    print(nan_count, nan_ratio)
+
+    if(not torch.isfinite(mat).all()):
+        print('[NaN detected in Tensor]!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
+
+    # mat = torch.nan_to_num(mat, nan=0.0)
+    print(torch.min(mat), torch.max(mat), torch.mean(mat))
+
 
 
 class NeuralFluidSplit(NeuralFluidBase):
@@ -51,6 +153,9 @@ class NeuralFluidSplit(NeuralFluidBase):
         self.velocity_field_tilde.load_state_dict(self.velocity_field.state_dict())
 
         if self.cfg.adv_ref == 0:
+            # karman 
+            # taylor green
+
             self.create_optimizer(reset=reset)    
             self.advect_velocity(dt=self.cfg.dt, flag=False)
 
@@ -89,9 +194,20 @@ class NeuralFluidSplit(NeuralFluidBase):
         """velocity advection: dudt = -(u\cdot grad)u"""
         samples = self.sample_in_training()
 
+        if(bOutBC):
+            samples = outBCData(samples,onlyOutData=False)
+
         # dudt
         with torch.no_grad():
+            assert(len(samples.shape)==2 and samples.shape[1]==2)
+            
+
+            # 这个查询过程不参与梯度计算
             prev_u = self.query_velocity(samples, use_prev=True).detach()
+        
+
+            # print('[prev u1]')
+      
 
         if self.cfg.time_integration == 'semi_lag':
             # backtracking
@@ -100,13 +216,20 @@ class NeuralFluidSplit(NeuralFluidBase):
             backtracked_position[..., 1] = torch.clamp(torch.clone(backtracked_position[..., 1]), min=self.scene_size[2], max=self.scene_size[3])
             
             with torch.no_grad():
+                # 这里面计算出来的量，是不参与梯度回传的
+
                 if not flag:
+                    # 查找向后追踪位置时的速度
                     advected_u = self.query_velocity(backtracked_position, use_prev=True).detach()
                 else:
+                    print('[USE tilde]')
                     advected_u = 2*self.query_velocity(backtracked_position, use_prev=True).detach() - self.query_velocity(backtracked_position, use_tilde=True)
 
             curr_u = self.query_velocity(samples)
-            
+
+            assert(not advected_u.requires_grad)
+
+            # 也就是要求velocity_field直接编码向后追踪时的速度
             loss = torch.mean((curr_u - advected_u) ** 2)
             loss_dict = {'main': loss}
 
@@ -182,7 +305,9 @@ class NeuralFluidSplit(NeuralFluidBase):
     #     grid = CubicBSplineGrid2d(resolution=grad.shape, n_channels=1)
 
 
+    # div 散度
     def wost_pressure(self, div, mag_path):
+        print('[WOST]')
         sceneConfig = self.wost_data["scene"]
         sceneConfig["sourceValue"] = mag_path
         solverConfig = self.wost_data["solver"]
@@ -191,10 +316,22 @@ class NeuralFluidSplit(NeuralFluidBase):
         scene = zombie_bindings.Scene(sceneConfig, div)
         # scene = zombie_bindings.Scene(sceneConfig)
         
+        print('P sample ',self.pressure_samples.detach().cpu().numpy().shape)
+        # n0 2
+
+        # 送入散度,求eq.7 
         samples, p_arr, grad_arr = zombie_bindings.wost(scene, solverConfig, outputConfig, self.pressure_samples.detach().cpu().numpy())
         samples = np.array(samples)
         p = np.array(p_arr)
         grad_p = np.array(grad_arr)
+
+        print('sample = wost', samples.shape)
+        # n0 2
+        print('p = wost', p.shape)
+        # n0 1
+        print('grad = wost ',grad_p.shape)
+        # n0 2
+
 
         # grad_p[np.isnan(grad_p)] = 0.0
 
@@ -227,6 +364,7 @@ class NeuralFluidSplit(NeuralFluidBase):
 
         return samples, p, grad_p
 
+    # 速度场的散度
     def get_divergence(self, resolution, save_path_png, save_path_pfm, vmin=None, vmax=None):
         grid_values, grid_samples = self.sample_velocity_field(resolution, to_numpy=False, return_samples=True, require_grad=True)
         div = divergence(grid_values, grid_samples).detach().cpu().numpy()
@@ -235,8 +373,6 @@ class NeuralFluidSplit(NeuralFluidBase):
         min = np.min(div)
         max = np.max(div)
         print(div.shape)
-        print(min)
-        print(max)
         
         fig = draw_scalar_field2D(div, vmin=vmin, vmax=vmax, figsize=self.fig_size, cmap='viridis', colorbar=True)
         save_figure_nopadding(fig, save_path_png)
@@ -251,9 +387,16 @@ class NeuralFluidSplit(NeuralFluidBase):
         
         if not self.wost_flag:
             self.wost_flag=True
+
+            #位置坐标
             self.pressure_samples = self.sample_in_training(resolution=self.cfg.wost_resolution)
             div = self.get_divergence(1000, save_path_png, save_path_pfm)
-            
+
+
+            print('wost(div) ',div.shape)
+
+
+            #only use
             samples_arr, p, grad_p = self.wost_pressure(div, save_path_pfm)
 
             # grad_p = self.laplacian_smoothing(samples_arr, grad_p)
@@ -273,18 +416,45 @@ class NeuralFluidSplit(NeuralFluidBase):
 
         random_indices = torch.randint(0, self.pressure_samples.shape[0]-1, (int((self.cfg.sample_resolution))**2, ))
         samples = self.pressure_samples[random_indices]
+
+
+        if(bOutBC):
+            samples = outBCData(samples, onlyOutData = False)
+               
+
         with torch.no_grad():
             prev_u = self.query_velocity(samples, use_prev=True).detach()
 
-        target_u = prev_u - self.grad_p[random_indices]
+            # print('[prev_u2] ',prev_u.shape)
+
+    
+        newnum = prev_u.shape[0] - self.grad_p[random_indices].shape[0]
+        if(newnum > 0):
+            temp=torch.zeros((newnum,2), device=prev_u.device, dtype=prev_u.dtype)
+            target_u = prev_u - torch.cat([self.grad_p[random_indices],temp], dim = 0)
+        else:
+            target_u = prev_u - self.grad_p[random_indices]
+ 
+        assert(not target_u.requires_grad)
+        assert(not self.grad_p.requires_grad)
+
+
+
         curr_u = self.query_velocity(samples)
+          
+        # debug
+        assert(len(curr_u.shape)==2 and curr_u.shape[1]==2)
+        assert(len(target_u.shape)==2 and target_u.shape[1]==2)
+        
         loss = torch.mean((curr_u - target_u) ** 2) # Eqn 11 in Rundi's paper INSR
         loss_dict = {'main': loss}
 
         return loss_dict
 
     def project_velocity(self):
+        print('[PROJ]')
         self._project_velocity()
+        # only use
     
     ################# visualization #####################
 
