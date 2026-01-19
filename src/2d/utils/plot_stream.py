@@ -99,7 +99,7 @@ def draw_stream(x,y,myu,myv,tempcnt,sampleRate=1):
     
     fig = plt.streamplot(
         Xg,Yg,u_grid,v_grid,
-        density=2,
+        density=DENSITY,
         color=np.sqrt(u_grid**2 + v_grid**2),
         cmap='viridis',
         norm=norm
@@ -159,7 +159,16 @@ bTranslateXY=0
 veldir = r"C:\Users\123\Desktop\TEMP\\"
 
 NX = 81
-NX = 62
+NX = 62    #taylor, liddriven
+
+
+DENSITY=2
+
+
+# karman_4edge3obs
+NX = 201
+SAMPLE_RATE=2
+DENSITY=3
 
 
 
@@ -176,7 +185,7 @@ for i in tqdm(range(120,125)):
 
     except:
         print('error at '+str(i))
-        break
+        continue
     
     print(values_v.shape)
     print(samples_v.shape)
@@ -193,7 +202,7 @@ for i in tqdm(range(120,125)):
     
 
     if(bDrawStream):
-        draw_stream(x,y,myu,myv,i)
+        draw_stream(x,y,myu,myv,i, sampleRate=SAMPLE_RATE)
     if(bDrawUv):
         if(bTranslateXY):
             x = x + 1.5
