@@ -25,6 +25,19 @@ np.set_printoptions(threshold=sys.maxsize)
 
 # torch.autograd.set_detect_anomaly(True)
 
+
+def toCpuSafe(x):
+    if isinstance(x, torch.Tensor):
+        return x.cpu()
+    else:
+        return x
+    
+debugcnt=0
+debugframe=0
+
+
+
+
 sampleNum=None
 outer_mat=None
 def outBCData(mat,width=0.25,onlyOutData=True):
@@ -103,23 +116,27 @@ def checkTensorNan(mat):
         mat=torch.as_tensor(mat)
         # NaN 的个数
     nan_count = torch.isnan(mat).sum().item()
-
+    inf_count = torch.isinf(mat).sum().item()
        # 元素总数
     total_count = mat.numel()
 
     # 占比
-    nan_ratio = nan_count / total_count
-    print('[Tensor check] ')
+    illegal_ratio = (inf_count+nan_count) / total_count
+    if(illegal_ratio>0):
+        print('[illegal_ratio]\t'+str(illegal_ratio))
+    # if(illegal_ratio>0.5):
+        # assert(False)
 
 
-    print(nan_count, nan_ratio)
+    # if(not torch.isfinite(mat).all()):
+        # print('[NaN detected in Tensor]!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
 
-    if(not torch.isfinite(mat).all()):
-        print('[NaN detected in Tensor]!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
-
-    # mat = torch.nan_to_num(mat, nan=0.0)
-    print(torch.min(mat), torch.max(mat), torch.mean(mat))
-
+    mat1 = torch.nan_to_num(mat, nan=0.0,  posinf=0.0, neginf=0.0)
+    mat1 = torch.clamp(mat1, min=-10.0, max=10.0)
+    
+    # print(torch.min(mat1), torch.max(mat1), torch.mean(mat1))
+    
+    return mat1
 
 
 class NeuralFluidSplit(NeuralFluidBase):
@@ -372,10 +389,12 @@ class NeuralFluidSplit(NeuralFluidBase):
 
         min = np.min(div)
         max = np.max(div)
-        print(div.shape)
+        # print(div.shape)
         
         fig = draw_scalar_field2D(div, vmin=vmin, vmax=vmax, figsize=self.fig_size, cmap='viridis', colorbar=True)
         save_figure_nopadding(fig, save_path_png)
+        # mag 
+        
         return div
 
     @NeuralFluidBase._training_loop
@@ -385,6 +404,8 @@ class NeuralFluidSplit(NeuralFluidBase):
         save_path_png = os.path.join(self.vis_mag_dir, f'mag_t{self.timestep:03d}.png')
         save_path_pfm = os.path.join(self.vis_mag_dir, f'mag_t{self.timestep:03d}.pfm')
         
+
+        # 每个step只算一次
         if not self.wost_flag:
             self.wost_flag=True
 
@@ -401,22 +422,86 @@ class NeuralFluidSplit(NeuralFluidBase):
 
             # grad_p = self.laplacian_smoothing(samples_arr, grad_p)
             
-            fig = self.draw_wost_pressure(p, samples_arr)
-            save_path_pressure = os.path.join(self.vis_pressure_dir, f'p_t{self.timestep:03d}.png')
-            save_figure_nopadding(fig, save_path_pressure)
-            
-            fig = self.draw_wost_pressure(grad_p[:, 0], samples_arr)
-            save_path_pressure = os.path.join(self.vis_pressure_dir, f'gradp_x_t{self.timestep:03d}.png')
-            save_figure_nopadding(fig, save_path_pressure)
-            fig = self.draw_wost_pressure(grad_p[:, 1], samples_arr)
-            save_path_pressure = os.path.join(self.vis_pressure_dir, f'gradp_y_t{self.timestep:03d}.png')
-            save_figure_nopadding(fig, save_path_pressure)
+
+            # [delete] 画图的当中，只有很少一部分会被使用上，其他的grad_p从未被使用
 
             self.grad_p = torch.Tensor(grad_p).to(self.device)
+            self.samples_arr=torch.Tensor(samples_arr).to(self.device)
 
-        random_indices = torch.randint(0, self.pressure_samples.shape[0]-1, (int((self.cfg.sample_resolution))**2, ))
+
+        # print('[grad p sample ratio]\t' + str(float((self.cfg.sample_resolution))**2/self.pressure_samples.shape[0]))
+        # about 6% 
+
+      
+
+       
+        assert(self.grad_p.shape[1]==2 and len(self.grad_p.shape)==2)
+
+
+        if(bSampleBigger):
+            topkratio=0.2
+            specialSampleNum = int(int((self.cfg.sample_resolution))**2 * topkratio)
+            
+            # temp1 = checkTensorNan(self.grad_p)
+            temp1=self.grad_p
+      
+            norm2 = temp1.square().sum(dim = 1)   # [N]
+            _, random_indices = torch.topk(norm2, k = specialSampleNum)
+
+
+            leftSampleNum= int((self.cfg.sample_resolution))**2 - specialSampleNum
+
+
+            mask = torch.ones(norm2.shape[0], device=random_indices.device, dtype=torch.bool)
+            print(mask.shape)
+            mask.scatter_(0, random_indices, False)
+            print(mask.shape)
+
+            remain_idx = torch.nonzero(mask, as_tuple=False).squeeze(1)
+            print(remain_idx.shape)
+            otherSample = remain_idx[torch.randint(0, len(remain_idx), (leftSampleNum,))]
+            print(otherSample.shape)
+        else:
+            random_indices = torch.randint(0, self.pressure_samples.shape[0]-1, (int((self.cfg.sample_resolution))**2, ))
+
+        global debugcnt
+        global debugframe
+        if(debugcnt==9997):
+            # 在获取到随机下标以后再画图更合适
+            TEMP_grad_p= toCpuSafe(self.grad_p)
+            TEMP_random_indices = toCpuSafe(random_indices)
+            TEMP_samples_arr = toCpuSafe(self.samples_arr)
+            TEMP_otherSample=toCpuSafe(otherSample)
+
+            fig = self.draw_wost_pressure(TEMP_grad_p[TEMP_random_indices][:,1], TEMP_samples_arr[TEMP_random_indices])
+            save_path_pressure = os.path.join(self.vis_pressure_dir, f'selected_gradp_y_t{debugframe:03d}.png')
+            save_figure_nopadding(fig, save_path_pressure)
+
+            fig = self.draw_wost_pressure(TEMP_grad_p[TEMP_random_indices][:,0], TEMP_samples_arr[TEMP_random_indices])
+            save_path_pressure = os.path.join(self.vis_pressure_dir, f'selected_gradp_x_t{debugframe:03d}.png')
+            save_figure_nopadding(fig, save_path_pressure)
+
+            if(bSampleBigger):
+                fig = self.draw_wost_pressure(TEMP_grad_p[TEMP_otherSample][:,1], TEMP_samples_arr[TEMP_otherSample])
+                save_path_pressure = os.path.join(self.vis_pressure_dir, f'other_gradp_y_t{debugframe:03d}.png')
+                save_figure_nopadding(fig, save_path_pressure)
+
+                fig = self.draw_wost_pressure(TEMP_grad_p[TEMP_otherSample][:,0], TEMP_samples_arr[TEMP_otherSample])
+                save_path_pressure = os.path.join(self.vis_pressure_dir, f'other_gradp_x_t{debugframe:03d}.png')
+                save_figure_nopadding(fig, save_path_pressure)
+
+            debugframe+=1
+            
+        debugcnt+=1
+        debugcnt%=10000
+
+
         samples = self.pressure_samples[random_indices]
 
+
+        if(bSampleBigger):
+            random_indices=torch.cat([random_indices,otherSample],dim=0)
+            samples= self.pressure_samples[random_indices]
 
         if(bOutBC):
             samples = outBCData(samples, onlyOutData = False)
@@ -427,13 +512,33 @@ class NeuralFluidSplit(NeuralFluidBase):
 
             # print('[prev_u2] ',prev_u.shape)
 
-    
+       
+
         newnum = prev_u.shape[0] - self.grad_p[random_indices].shape[0]
+
         if(newnum > 0):
+            assert(bOutBC)
             temp=torch.zeros((newnum,2), device=prev_u.device, dtype=prev_u.dtype)
             target_u = prev_u - torch.cat([self.grad_p[random_indices],temp], dim = 0)
         else:
+            if(bEnhanceGradP):
+                self.grad_p = self.grad_p * 1.5
+
+            
+            # temp = temp1[random_indices]
+
+
+
+
+            # print('[sampled gradp mean ]\t'+str(torch.mean(torch.sqrt(temp.square().sum(dim = 1)))))
             target_u = prev_u - self.grad_p[random_indices]
+        
+
+            # 但是,这里的采样必须分布在全局,否则,网络对于那些缺乏数据的区域,产生的编码是混乱的(毕竟,没有任何数据在那里),
+            # 所以grad p很大和grad p为零其实一样重要
+            #       w采用继承参数的机制,微调,并且把上一帧的训练数据仍然保持进来     X
+                        # 实测不行
+
  
         assert(not target_u.requires_grad)
         assert(not self.grad_p.requires_grad)
@@ -459,8 +564,28 @@ class NeuralFluidSplit(NeuralFluidBase):
     ################# visualization #####################
 
     def draw_wost_pressure(self, p_arr, samples):
+
+        if torch.is_tensor(p_arr):
+            p_arr= p_arr.detach().cpu().numpy()
+
+        if torch.is_tensor(samples):
+            samples= samples.detach().cpu().numpy()
+
         fig, ax = plt.subplots(figsize=self.fig_size)
-        sc = ax.scatter(samples[:, 0], samples[:, 1], c=p_arr, cmap='viridis', s=0.1)
+        mask=np.isnan(p_arr)
+        mask=np.isinf(p_arr) | mask
+
+        dotsize=800
+        if("kar" in self.cfg.exp_name):
+            dotsize=80
+        else:
+            assert(False)
+        sc = ax.scatter(samples[mask, 0], samples[mask, 1], color='red', s=dotsize, alpha=0.5)
+
+        # 可变数值上下限，但颜色的极限色彩不变。
+        # 如果场上没有什么太大的数值，那么数值上下限也会很小（0.005）
+
+        sc = ax.scatter(samples[:, 0], samples[:, 1], c=p_arr, cmap='viridis', s=dotsize, alpha=0.5)
         ax.set_axis_off()
         plt.colorbar(sc)
         
