@@ -35,7 +35,21 @@ class Config(object):
                 assert(bOutBC)
             else:
                 assert(not bOutBC)
-     
+
+            if("basicVel" in self.exp_name):
+                assert(bBasicVel)
+            else:
+                assert(not bBasicVel)
+
+            if("noslip" in self.exp_name):
+                assert(btangConstraint)
+            else:
+                assert(not btangConstraint)
+
+            if("sampleb" in self.exp_name):
+                assert(bSampleBigger)
+            else:
+                assert(not bSampleBigger)
 
 
         # experiment paths
