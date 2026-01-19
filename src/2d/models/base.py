@@ -15,8 +15,32 @@ from PIL import Image
 import os
 from scipy.special import erf
 import matplotlib.pyplot as plt
+from utils.prms import *
+from utils.plot_stream import drawU
+
+def transFormField(samples):
+    print('[transform field]')
+    print(samples.shape)
+    eps=1e-8
+    x = samples[..., 0]
+    y = samples[..., 1]
+
+    x_min, x_max = x.min(), x.max()
+    y_min, y_max = y.min(), y.max()
 
 
+    minX, maxX = biggestField[0], biggestField[1]
+    minY, maxY = biggestField[2], biggestField[3]
+
+    x_scaled = (x - x_min) / (x_max - x_min + eps) * (maxX - minX) + minX
+    y_scaled = (y - y_min) / (y_max - y_min + eps) * (maxY - minY) + minY
+
+    ret = torch.stack([x_scaled, y_scaled], dim = -1)
+    assert ret.shape == samples.shape
+    return ret
+
+
+tempcnt = 1
 class NeuralFluidABC(ABC):
     def __init__(self, cfg):
         self.cfg = cfg
@@ -45,10 +69,16 @@ class NeuralFluidABC(ABC):
         self.fig_size = (int((self.scene_size[1] - self.scene_size[0]) * 10), int((self.scene_size[3] - self.scene_size[2]) * 10))
 
         # neural implicit network for velocity
+        # zxc 这里多次、紧密地调用同一个函数，明显是重复创建了
         self.velocity_field = get_network(cfg, 2, 2).cuda()
+        # 可训练
+
+
         self.velocity_field_prev = get_network(self.cfg, 2, 2).cuda()
         self.velocity_field_tilde = get_network(self.cfg, 2, 2).cuda()
         self._set_require_grads(self.velocity_field_prev, False)
+        #不可优化，从头到尾都不可优化
+
         self.device = torch.device("cuda:0")
         torch.cuda.empty_cache()
 
@@ -64,6 +94,7 @@ class NeuralFluidABC(ABC):
         param_list = []
         for net in self._trainable_networks.values():
             if reset:
+                # 每次都是从初始的权重开始重新训练
                 net.net.apply(net.weight_init)
                 net.net[0].apply(net.first_layer_init)
 
@@ -95,6 +126,7 @@ class NeuralFluidABC(ABC):
             self.scheduler.step(loss_dict['main'])
             # self.scheduler.step()
     
+    # 开关model的梯度状态
     def _set_require_grads(self, model, require_grad):
         for p in model.parameters():
             p.requires_grad_(require_grad)
@@ -155,38 +187,193 @@ class NeuralFluidABC(ABC):
         self.has_obstacle = True
         self.obs_sdf_func = obs_sdf_func
 
-    def query_velocity(self, samples, eps=1e-1, use_prev=False, use_tilde=False, use_bdry_cond=True):
+      
+
+       
+    #use_prev是否开启，根本就是从不同的网络里取值
+    def query_velocity(self, samples, eps=1e-1, use_prev=False, use_tilde=False, use_bdry_cond=True, test1=False):
+        
+        
         eps = self.bdry_eps
 
+        assert(use_bdry_cond)
+
+
         if use_tilde:
-            net_vel = self.velocity_field_tilde(samples)
+            if(bCoordTranslation):
+                net_vel = self.velocity_field_tilde(samples + torch.Tensor([translationX, translationY]).cuda())
+            elif(bFitField):
+                net_vel = self.velocity_field_tilde(transFormField(samples))
+            else:
+                net_vel = self.velocity_field_tilde(samples)
+                
         else:
             if use_prev:
-                net_vel = self.velocity_field_prev(samples)
+                if(bCoordTranslation):
+                    net_vel= self.velocity_field_prev(samples + torch.Tensor([translationX, translationY]).cuda())
+                elif(bFitField):
+                    net_vel = self.velocity_field_prev(transFormField(samples))      
+                else:
+                    net_vel = self.velocity_field_prev(samples)
+                   
             else:
-                net_vel = self.velocity_field(samples)
+                if(bCoordTranslation):
+                    net_vel= self.velocity_field(samples + torch.Tensor([translationX, translationY]).cuda())
+                elif(bFitField):
+                    net_vel = self.velocity_field(transFormField(samples))
+                else:
+                    net_vel = self.velocity_field(samples)
+              
+              
 
-        if use_bdry_cond and self.cfg.src == 'karman':
+        
+
+        if use_bdry_cond and (self.cfg.src == 'karmanEmpty' or self.cfg.src == 'karman4edge'):
+            inlet_mask = (samples[..., 0]>=self.scene_size[0]) & (samples[..., 0]<=self.scene_size[0] + eps)
+            inlet_mask2 =(samples[..., 0]>self.scene_size[0] + eps) & (samples[..., 0]<=self.scene_size[0] + 2 * eps)
+            inlet_mask2 = inlet_mask2 & (samples[..., 1]>= self.scene_size[2]+0.3) & (samples[..., 1]<=self.scene_size[3] - 0.3)
+            
+            # net_vel[..., 1][inlet_mask] = self.cfg.karman_vel
+            
+            bigmask =    (samples[..., 0]>=self.scene_size[0]) & (samples[..., 0]<=self.scene_size[0] + 0.2)
+            net_vel[..., 1][bigmask]=self.cfg.karman_vel         
+
+            # TEST attach
+            # net_vel[..., 1][inlet_mask2] = self.cfg.karman_vel
+
+
+
+            if("empty" in self.cfg.exp_name):
+                pass 
+            else:
+                net_vel = self.smoothstep_circular_obs(samples, net_vel, eps=eps)
+
+
+            if "4edge" in self.cfg.exp_name:
+
+                u_weight = torch.min(
+                            torch.abs(samples[..., 0] - (self.scene_size[0])).clamp(min=0, max=eps),
+                            torch.abs(samples[..., 0] - (self.scene_size[1])).clamp(min=0, max=eps)) / eps
+            else:
+    
+                #right bound
+                assert(self.scene_size[1] > self.scene_size[0])
+                u_weight=        torch.min(torch.tensor(eps,device=samples.device),
+                                    torch.abs(samples[..., 0] - (self.scene_size[1])).clamp(min=0, max=eps) )/ eps
+
+
+            
+            v_weight = torch.min(torch.abs(samples[..., 1] - (self.scene_size[2])).clamp(min=0, max=eps),
+                                torch.abs(samples[..., 1] - (self.scene_size[3])).clamp(min=0, max=eps)) / eps
+            
+
+            if(btangConstraint):
+                
+
+                u_weight = torch.torch.minimum(
+                torch.minimum(
+                            torch.abs(samples[..., 0] - (self.scene_size[0])).clamp(min=0, max=eps),
+                            torch.abs(samples[..., 0] - (self.scene_size[1])).clamp(min=0, max=eps)),
+                torch.minimum(
+                                 torch.abs(samples[..., 1] - (self.scene_size[2])).clamp(min=0, max=eps),
+                                 
+                                 torch.abs(samples[..., 1] - (self.scene_size[3])).clamp(min=0, max=eps)
+                                  ))/ eps
+                v_weight=u_weight
+
+                
+
+
+            weight = torch.stack([u_weight, v_weight], dim=-1).detach()
+    
+            if(test1):
+                print('[out weight]')
+                net_vel = weight
+
+            else:
+           
+                net_vel = weight * net_vel
+
+
+
+        # 如果有边界条件，还需要乘以权重
+        elif use_bdry_cond and self.cfg.src == 'karman':
             inlet_mask = (samples[..., 0]>=self.scene_size[0]) & (samples[..., 0]<=self.scene_size[0]+eps)
             net_vel[..., 0][inlet_mask] = self.cfg.karman_vel
 
-            net_vel = self.smoothstep_circular_obs(samples, net_vel, eps=eps)
+ 
+            if("vertVel" in self.cfg.exp_name):
+                net_vel[..., 0][inlet_mask] = 0
+                net_vel[..., 1][inlet_mask] = self.cfg.karman_vel
+
+
+            
+            if("empty" in self.cfg.exp_name):
+                pass
+            else:
+                net_vel = self.smoothstep_circular_obs(samples, net_vel, eps=eps)
+            # 里面还乘了一次权重，是圆柱相关的
+
+
 
             u_weight = torch.ones_like(samples[..., 0])
+
+
+            #TEST right bound
+            # assert(self.scene_size[1] > self.scene_size[0])
+            # u_weight=           torch.abs(samples[..., 0] - (self.scene_size[1])).clamp(min=0, max=eps) / eps
+
+            
             v_weight = torch.min(torch.abs(samples[..., 1] - (self.scene_size[2])).clamp(min=0, max=eps),
                                 torch.abs(samples[..., 1] - (self.scene_size[3])).clamp(min=0, max=eps)) / eps
+            
+            # print('[v weight]\t',v_weight.shape)
+            # print('[u weight]\t',u_weight.shape)
+
             weight = torch.stack([u_weight, v_weight], dim=-1).detach()
+    
+            if(bOutputBCWeight):
+                print('[out weight]')
+                net_vel = weight
 
-            net_vel = weight * net_vel
+            else:
+                net_vel = weight * net_vel
 
-        elif use_bdry_cond and self.cfg.src == 'taylorgreen':
+
+
+        elif use_bdry_cond and \
+        ( 
+            self.cfg.src == 'taylorgreen'
+        or self.cfg.src  == 'liddriven'
+        or self.cfg.src  == 'lidmid'
+        ):
+            # 边界权重
             u_weight = torch.min(torch.abs(samples[..., 0] - (self.scene_size[0])).clamp(min=0, max=eps),
                                 torch.abs(samples[..., 0] - (self.scene_size[1])).clamp(min=0, max=eps)) / eps
             v_weight = torch.min(torch.abs(samples[..., 1] - (self.scene_size[2])).clamp(min=0, max=eps),
                                 torch.abs(samples[..., 1] - (self.scene_size[3])).clamp(min=0, max=eps)) / eps
+            
+
+            if(btangConstraint):
+                u_weight = torch.torch.minimum(
+                torch.minimum(
+                            torch.abs(samples[..., 0] - (self.scene_size[0])).clamp(min=0, max=eps),
+                            torch.abs(samples[..., 0] - (self.scene_size[1])).clamp(min=0, max=eps)),
+                torch.minimum(
+                                 torch.abs(samples[..., 1] - (self.scene_size[2])).clamp(min=0, max=eps),
+                                 
+                                 torch.abs(samples[..., 1] - (self.scene_size[3])).clamp(min=0, max=eps)
+                                  ))/ eps
+                v_weight=u_weight
+
             weight = torch.stack([u_weight, v_weight], dim=-1).detach()
 
-            net_vel = weight * net_vel
+            
+            if(test1):
+                print('[out weight]')
+                net_vel = weight
+            else:
+                net_vel = weight * net_vel
 
         elif use_bdry_cond and self.cfg.src == 'jpipe':
             inlet_mask = (samples[..., 0]>=0.0) & (samples[..., 0]<=0.1) & (samples[..., 1]>=0.0) & (samples[..., 1]<=0.5)
@@ -223,6 +410,7 @@ class NeuralFluidABC(ABC):
 
         return net_vel
 
+    # zxcknow 位置坐标
     def sample_in_training(self, resolution=None):
         if resolution == None:
             resolution = self.sample_resolution
@@ -236,7 +424,8 @@ class NeuralFluidABC(ABC):
         else:
             raise NotImplementedError
         
-        if self.cfg.src == 'karman':
+        if self.cfg.src == 'karman' \
+         or self.cfg.src == 'karman4edge':
             dist = self.obs_sdf_func(samples)
             samples = samples[dist > 0]
 
@@ -250,12 +439,16 @@ class NeuralFluidABC(ABC):
 
         return samples
 
-    def sample_velocity_field(self, resolution, to_numpy=True, with_boundary=True, return_samples=False, require_grad=False):
+    # 从预测网络里取数据（use_prev=true）
+    def sample_velocity_field(self, resolution, to_numpy=True, with_boundary=True, return_samples=False, require_grad=False, test1=False):
         grid_samples = sample_uniform_2D(resolution, with_boundary=with_boundary, size=self.scene_size, device=self.device)
         if require_grad:
             grid_samples = grid_samples.requires_grad_(True)
 
-        out = self.query_velocity(grid_samples, use_prev=True, use_bdry_cond=True)
+
+        print('[sample vel]', grid_samples.shape)
+        # x y 2
+        out = self.query_velocity(grid_samples, use_prev=True, use_bdry_cond=True, test1=test1)
 
         if to_numpy:
             out = out.detach().cpu().numpy()
@@ -274,19 +467,63 @@ class NeuralFluidABC(ABC):
             exit()
 
     def draw_velocity(self, resolution, save_txt_v = None, save_txt_s = None):
-        grid_values, grid_samples = self.sample_velocity_field(resolution, to_numpy=True, with_boundary=True, return_samples=True)
+        if(bOutputBCWeight):
+            grid_values, grid_samples = self.sample_velocity_field(resolution, to_numpy=True, with_boundary=True, return_samples=True,test1=True)
+        else:
+            grid_values, grid_samples = self.sample_velocity_field(resolution, to_numpy=True, with_boundary=True, return_samples=True)
 
         if save_txt_v is not None:
+            print('[shape before txt]')
+            print(grid_values.shape)
+            print(grid_samples.shape)
+       
+            # print('[save txt shape], ',gridv.shape)
+            # N 2
+            # print('[save txt shape2], ', grids.shape)
+            # N 2
+           
+
             np.savetxt(save_txt_v, grid_values.reshape((grid_values.shape[0]*grid_values.shape[1], grid_values.shape[2])))
             np.savetxt(save_txt_s, grid_samples.reshape((grid_samples.shape[0]*grid_samples.shape[1], grid_samples.shape[2])))
+
+            # np.save(save_txt_v+'.npy', gridv)
+            # np.save(save_txt_s+'.npy', grids)
+
         x, y = grid_samples[..., 0], grid_samples[..., 1]
-        fig = draw_vector_field2D(grid_values[..., 0], grid_values[..., 1], x, y, c=self.center, r=self.radius, figsize=self.fig_size)
+        # print(x.shape)
+        # print(grid_values[..., 0].shape)
+
+        myu = grid_values[..., 0]
+        myv = grid_values[..., 1]
+
+
+
+        global tempcnt
+        if(bOutputBCWeight):
+            print('[output bc weight at dir]' + str(save_txt_s))
+            drawU(x=x,y=y,u=myu,index=0,txtpath=save_txt_s)
+            drawU(x=x,y=y,u=myv,index=0,txtpath=save_txt_s,fname="v_component")
+            tempcnt+=1
+
+
+
+        fig = draw_vector_field2D(grid_values[..., 0], grid_values[..., 1], x, y, c=self.center, r=self.radius, figsize=self.fig_size,txtpath=save_txt_s,expname=self.cfg.exp_name)
         return fig
 
     def draw_vorticity(self, resolution, save_txt_v = None, save_txt_s = None, vmin=-5, vmax=5):
         grid_values, grid_samples = self.sample_velocity_field(resolution, to_numpy=False, return_samples=True, require_grad=True)
         curl = curl2d(grid_values, grid_samples).squeeze(-1).detach().cpu().numpy()
         grid_samples = grid_samples.detach().cpu().numpy()
+        # print('[grid samples]', grid_samples.shape)#    X Y 2
+        # print('[grid value] ', grid_values.shape)# X Y 2
+        # print('[min x]', np.min(grid_samples[...,0]))
+        # print('[max x]', np.max(grid_samples[...,0]))
+        # print('[min y]', np.min(grid_samples[...,1]))
+        # print('[max y]', np.max(grid_samples[...,1]))
+        # print('[curl]', curl.shape) # X Y
+        if(bVorIsCoord):
+            curl = grid_samples[...,1]
+            
 
         if save_txt_v is not None:
             np.savetxt(save_txt_v, curl.reshape((curl.shape[0]*curl.shape[1], 1)))
@@ -315,6 +552,8 @@ class NeuralFluidBase(NeuralFluidABC):
         """forward computation for add source"""
         
         samples = self.sample_in_training()
+        # print('zxc 325', samples.shape)
+        # N 2
 
         out_rand = self.query_velocity(samples, use_bdry_cond=True)
         if is_init:
@@ -324,6 +563,7 @@ class NeuralFluidBase(NeuralFluidABC):
 
         loss_random = F.mse_loss(out_rand, target_rand_val)
         loss_dict = {'main': loss_random}
+        # zxc main is loss 
 
         return loss_dict
     
@@ -332,6 +572,8 @@ class NeuralFluidBase(NeuralFluidABC):
         self.source_func = source_func
         self._add_source(source_func, is_init)
         self.velocity_field_prev.load_state_dict(self.velocity_field.state_dict())
+        # zxc 前一帧速度=当前速度，只是copy权重参数
+        
         self.save_ckpt()
 
     def smoothstep(self, x, xmin, xmax, eps=1e-1, upper=True):
@@ -353,6 +595,12 @@ class NeuralFluidBase(NeuralFluidABC):
         dist = self.obs_sdf_func(samples)
         threshold = eps
         weight = torch.clamp(dist, 0, threshold) / threshold
+
+        # if(bOutputBCWeight):
+        #     print('[output obs weight]')
+        #     vel = torch.ones_like(vel)
+        # else:
+        #     pass
         vel *= weight.unsqueeze(-1)
 
         return vel

@@ -4,6 +4,7 @@ from functools import partial
 from config import Config
 from models import get_model
 from sources import get_source_velocity, circle_obstable_functions, jpipe_obstable_functions
+from sources import rectangle_obstable_functions,rect3_obstable_functions
 from utils.vis_utils import save_figure, frames2gif
 from utils.file_utils import ensure_dirs
 import matplotlib.pyplot as plt
@@ -59,6 +60,8 @@ def get_scene_size(filename):
     for i in range(l.shape[0]):
         if np.all(v[l[i, 0]] == v[l[i, 1]]):
             continue
+
+        # 是障碍物的标准：在minx,maxx以内
         if (v[l[i,0], 0] > min_x and v[l[i,0], 0] < max_x and v[l[i,0], 1] > min_y and v[l[i,0], 1] < max_y) or (v[l[i,1], 0] > min_x and v[l[i,1], 0] < max_x and v[l[i,1], 1] > min_y and v[l[i,1], 1] < max_y):
             obstacle_lines.append(l[i])
     obstacle_lines = np.array(obstacle_lines)
@@ -99,21 +102,72 @@ print("bbox: ", cfg.scene_size)
 # create network and training agent
 fluid = get_model(cfg)
 
-if cfg.src == 'karman':
-    if cfg.obstacle == "one_cylinder":
+if cfg.src == 'karman' \
+or ( 'karman4edge' in cfg.src):
+    if cfg.obstacle == "one_cylinder" \
+    or cfg.obstacle == "one_rect" \
+    or  "three_rect" in cfg.obstacle:
         mask = (vertices[..., 0] == cfg.scene_size[2])
         fluid.vertices = torch.Tensor(vertices[~mask]).to(fluid.device)
 
         fluid.obstacle_vertices = obstacle_vertices
         obs_c = np.mean(obstacle_vertices, axis=0)
         obs_r = np.mean(np.linalg.norm(obstacle_vertices - obs_c, axis=1))+wost_data["output"]["boundaryDistanceMask"]
+
+        assert(obstacle_vertices.shape[1]==2 and (len(obstacle_vertices.shape)==2))        
+        hy = np.max(obstacle_vertices[..., 1] - obs_c[...,1]) * 2
+        hx = np.max(obstacle_vertices[..., 0] - obs_c[...,0]) * 2
+
+
+        if("three_rect" in cfg.obstacle):
+            ltrb0=[-1.0976  ,  0.59492,
+                    0.10137  ,  0.49544]
+
+            ltrb1=[-0.038291,	0.48693,
+                    0.099609	,	-0.48777]
+
+            ltrb2=[-1.0976,	-0.49516,
+                    0.10137	,-0.59465]
+            
+            if("three_rectB" in cfg.obstacle):
+
+                # -0.90662
+
+                ltrb2=[  -0.56662 ,  -0.49516,
+                0.093342, -0.59465]
+
+        
+
+
+            hy0=    ltrb0[1]-ltrb0[3]
+            hy1=    ltrb1[1]-ltrb1[3]
+            hy2=     ltrb2[1]-ltrb2[3]
+
+            hx0=  ltrb0[2]-ltrb0[0]
+            hx1= ltrb1[2]-ltrb1[0]
+            hx2= ltrb2[2]-ltrb2[0]
+            center0= np.array([     (ltrb0[2]+ltrb0[0])/2,  (ltrb0[1]+ltrb0[3])/2])
+            center1=np.array([     (ltrb1[2]+ltrb1[0])/2,  (ltrb1[1]+ltrb1[3])/2])
+            center2=np.array([     (ltrb2[2]+ltrb2[0])/2,  (ltrb2[1]+ltrb2[3])/2])
         
         print("obs_c: ", obs_c)
         print("obs_radius: ", obs_r)
         
         center = np.array([obs_c[0], obs_c[1]])
+        print(obstacle_vertices.shape) #N,2 
+        print(obs_c.shape) #2,
+        print('[rect center]')
+        print(center)
+
+        
         radius = obs_r
         sign_func = circle_obstable_functions(center, radius)
+        if cfg.obstacle == "one_rect":
+           sign_func = rectangle_obstable_functions(center, hy,hx)
+        elif("three_rect" in cfg.obstacle):
+            sign_func = rect3_obstable_functions(center0,hy0,hx0, center1,hy1,hx1, center2,hy2,hx2)
+
+
         fluid.add_obstacle(sign_func)
         fluid.center = center
         fluid.radius = radius
@@ -132,7 +186,13 @@ else:
         source_func = partial(source_func, karman_vel=cfg.karman_vel, obs_func=sign_func, scene_size=cfg.scene_size, eps=cfg.bdry_eps)
     if cfg.src == 'taylorgreen':
         source_func = partial(source_func, scene_size=cfg.scene_size)
+    if cfg.src == 'karmanEmpty':
+        source_func = partial(source_func, karman_vel=cfg.karman_vel, scene_size=cfg.scene_size, eps=cfg.bdry_eps)
+    if cfg.src == 'karman4edge':
+        source_func = partial(source_func, karman_vel=cfg.karman_vel,obs_func=sign_func, scene_size=cfg.scene_size, eps=cfg.bdry_eps)
     if cfg.src == 'liddriven':
+        source_func = partial(source_func, scene_size=cfg.scene_size)
+    if cfg.src == 'lidmid':
         source_func = partial(source_func, scene_size=cfg.scene_size)
     if cfg.src == 'jpipe':
         source_func = partial(source_func, karman_vel=cfg.karman_vel, obs_func=sign_func, eps=cfg.bdry_eps)
@@ -174,7 +234,8 @@ else:
 energy = []
 timestep = []
 # fluid.reset_weights()
-if cfg.src == 'karman':
+if cfg.src == 'karman' \
+or cfg.src == 'karmanEmpty' :
     cfg.bdry_eps /= 2
     fluid.bdry_eps /= 2
 for t in range(cfg.n_timesteps):
@@ -189,7 +250,7 @@ for t in range(cfg.n_timesteps):
         fluid.add_source('velocity', source_func, is_init=False)
 
     # time-stepping
-    print("[timestep]\t"+str( fluid.timestep) +"########################################")
+    print(cfg.exp_name+"\t[timestep]\t"+str( fluid.timestep) +"########################################")
     fluid.step()
 
     # save visualization
