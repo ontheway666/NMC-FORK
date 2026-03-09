@@ -1,6 +1,6 @@
-import ttkbootstrap as tb
 import pygubu
 
+import tkinter as tk
 import ttkbootstrap as tb
 from ttkbootstrap.constants import *
 from tkinter import filedialog
@@ -14,15 +14,46 @@ from PIL import Image, ImageTk
 
 
 def load_folder():
-    folder = filedialog.askdirectory()
+    # folder = filedialog.askdirectory()
+    folder = r"D:\ZS\BS\temp karman"
     if not folder:
         return
+    
+    foldervor=os.path.join(folder, "vorticity")
+    # print(foldervor)
+    # assert(False)
+
+
+    foldervel=os.path.join(folder, "velocity")
+    # folderstr=os.path.join(folder, "streamline")
+    folderstr=os.path.join(folder, "pressure")
+    folderqc=os.path.join(folder, "qc")
+
+
 
     # 读取图片
     global image_list
+    global image_listvel
+    global image_listqc
+
     image_list = [
-        os.path.join(folder, f)
-        for f in sorted(os.listdir(folder))
+        os.path.join(foldervor, f)
+        for f in sorted(os.listdir(foldervor))
+        if f.lower().endswith((".png", ".jpg", ".jpeg"))
+    ]
+    image_listvel=[
+        os.path.join(foldervel, f)
+        for f in sorted(os.listdir(foldervel))
+        if f.lower().endswith((".png", ".jpg", ".jpeg"))
+    ]
+    image_listqc=[
+        os.path.join(foldervel, f)
+        for f in sorted(os.listdir(folderqc))
+        if f.lower().endswith((".png", ".jpg", ".jpeg"))
+    ]
+    image_liststr=[
+        os.path.join(foldervel, f)
+        for f in sorted(os.listdir(folderstr))
         if f.lower().endswith((".png", ".jpg", ".jpeg"))
     ]
 
@@ -40,7 +71,24 @@ print(len(image_list))
 
 globalvar=5
 
+
+
 class App:
+    def write_log(self,msg):
+
+        iterval=str(1)
+        info="————————————\n"+\
+            "[iter]\t"+iterval+"\t"+\
+        "[loss]\t"+iterval+"\n"+\
+        "[ene]\t"+iterval+"\t"+\
+        "[alpha]\t"+iterval+"\n"+\
+        "[part]\t"+iterval+"\n"
+			  
+
+        self.logtext.config(state="normal")
+        self.logtext.insert(tk.END, info)
+        self.logtext.see(tk.END)  # 自动滚动到底部
+        self.logtext.config(state="disabled")
 
     
     def show_model(self,val):
@@ -102,30 +150,93 @@ class App:
         # o3d.visualization.draw_geometries([pcd])
 
 
-        vis = o3d.visualization.Visualizer()
-        vis.create_window()
+        # vis = o3d.visualization.Visualizer()
+        # vis.create_window()
 
-        vis.add_geometry(pcd)
+        # vis.add_geometry(pcd)
 
-        opt = vis.get_render_option()
+        # opt = vis.get_render_option()
 
-        # abandon
-        opt.point_size = 20.0
-        opt.background_color = [0, 0, 0]
+        # # abandon
+        # opt.point_size = 20.0
+        # opt.background_color = [0, 0, 0]
 
-        vis.run()
-        vis.destroy_window()
+        # vis.run()
+        # vis.destroy_window()
 
+    def _traverse_children(self, widget):
 
+        children = widget.winfo_children()  
+        
+        for child in children:
+            print(child)
+            if isinstance(child, tb.Button):
+            
+                 child.config(bootstyle="outline button info") 
+            self._traverse_children(child)
 
+    def var_updated(self, *args):
+        print("var update")
     def __init__(self, master):
 
-        self.builder = pygubu.Builder()
-        self.builder.add_from_file("guiV3.ui")
+        self.grav=tk.DoubleVar(value=9.8)
+        self.grav.trace_add("write", self.var_updated)
 
-        self.mainwindow = self.builder.get_object("frml", master)
+       
+
+
+        self.builder = pygubu.Builder()
+        self.builder.add_from_file("guiV31.ui")
+        
+
+        self.mainwindow = self.builder.get_object("frame1", master)  
+        self.logtext=self.builder.get_object("logtext", master)
+
+        self.imgwin=self.builder.get_object("imgwin")
+        self.imgvor=self.builder.get_object("imgvor")
+        self.imgstr=self.builder.get_object("imgqc")
+        self.imgqc=self.builder.get_object("imgstr")
+
+
+        self.imgstat1=self.builder.get_object("imgstat1")
+        self.imgstat2=self.builder.get_object("imgstat2")
+
+
+        # 创建主窗口
+        # root = self.builder.get_object('root')  # 获取根窗口
+
+        # 获取所有控件对象
+        # self.all_widgets = self.mainwindow.winfo_children()
+
+
+        # for widget in self.all_widgets:
+        #     pass
+        #     # 检查控件是否是 ttk.Button 类型
+        #     # if isinstance(widget, tb.Button):
+        #         # pass
+        #         # widget.config(bootstyle="success")  # 设置默认样式
+
+
+        self._traverse_children(self.mainwindow)
+
+        self.startbtn=self.builder.get_object("start")
+        self.startbtn.config(bootstyle='outline button success') 
+        self.stopbtn=self.builder.get_object("stop")
+        self.stopbtn.config(bootstyle='outline button secondary')
+
+
+
 
         self.builder.connect_callbacks(self)
+
+
+        (self.builder.tkvariables['grav'].set(9.8))
+        (self.builder.tkvariables['gamma'].set(0.5))
+        (self.builder.tkvariables['kernelsize'].set(4))
+        (self.builder.tkvariables['layerstr'].set("[3,64,64,3]"))
+        (self.builder.tkvariables['modelname'].set("cconv Default"))
+        (self.builder.tkvariables['channel'].set(64))
+
 
 
         self.tree = self.builder.get_object("treeview1")
@@ -136,9 +247,9 @@ class App:
         # self.tree.heading("age", text="固体1(obj)引用")
         # self.tree.heading("age", text="固体2(obj)引用")
         data = [
-            ["apple", 10],
-            ["banana", 20],
-            ["orange", 30]
+            ["wave", "有",  "box.obj",   "fluid.obj",  "有"],
+            ["rotating panel", "有",  "box.obj",   "fluid.obj",  "有"],
+            ["vessel", "有",  "box.obj",   "fluid.obj",  "有"],
         ]
         for row in data:
             self.tree.insert("", "end", values=row)
@@ -155,6 +266,22 @@ class App:
 
         self.show_image(idx)
 
+    def cutImg(self,img,ratio=0.4):
+        w, h = img.size
+
+      
+
+        new_w = int(w * 1)
+        new_h = int(h * ratio)
+
+        # 中心裁剪坐标
+        left = (w - new_w) // 2
+        top = (h - new_h) // 2
+        right = left + new_w
+        bottom = top + new_h
+
+        img = img.crop((left, top, right, bottom))
+        return img
 
     def show_image(self,idx):
 
@@ -164,20 +291,70 @@ class App:
             return
         from PIL import Image, ImageTk
         print('try open' + str(image_list[idx]))
-        img = Image.open(image_list[idx])
-        img = img.resize((600, 400))  # 可自行调整大小
+        print(self.builder.tkvariables['grav'].get())
+        img =         Image.open(image_list[idx])
+        imgvel=     Image.open(image_listvel[idx])
+        # imgqc=      Image.open(image_listqc[idx])
+        img_ene=Image.open(r"d:\ZS\BS\ene.png")
+        
 
+        # cut 
+        img=self.cutImg(img)
+        imgvel=self.cutImg(imgvel)
+
+
+        imgvel=imgvel       .resize((int(60*5),   int(30*5)    ))
+        img = img       .resize((int(60*5),   int(30*5)    ))
+
+
+        img_ene = img_ene.resize((int(60*5),   int(40*5)    ))
 
         global current_photo
-        imgwin=self.builder.get_object("imgwin")
+        global current_photoene
+        global current_photovel
         current_photo = ImageTk.PhotoImage(img)
-        imgwin.configure(image=current_photo)
+        current_photoene=ImageTk.PhotoImage(img_ene)
+        current_photovel=ImageTk.PhotoImage(imgvel)
+        # current_photoqc=ImageTk.PhotoImage(imgqc)
+
+        self.imgwin.configure(image=current_photovel)
+        self.imgvor.configure(image=current_photo)
+        # self.imgqc.configure(image=current_photoqc)
+        self.imgstr.configure(image=current_photo)
 
 
-app = tb.Window(themename="pulse")
+        # self.imgstat1.configure(image=current_photoene)
+        # self.imgstat2.configure(image=current_photo)
+
+
+# app=tk.PanedWindow(themename="clam")
+app = tb.Window(themename="morph")
+# app = tb.Window(themename="united")
+# app = tb.Window(themename="litera")
+# app = tb.Window(themename="cerculean")
+# app = tb.Window(themename="yeti")
+
+
+# print(tb.Style().theme_names())
+# assert(False)
+
+
+
+
+# app = tb.Window(themename="clam")
+
+# app = tb.Window(themename="lumen")
+
+
+
+
 
 App(app)
 
+def var_updated():
+    print('updated global')
+grav=tk.DoubleVar(value=98)
+grav.trace_add("write", var_updated)
 
 
 

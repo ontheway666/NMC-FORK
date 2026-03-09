@@ -100,6 +100,8 @@
                             <property name="width">10</property>
                             <layout manager="grid">
                               <property name="column">0</property>
+                              <property name="padx">2</property>
+                              <property name="pady">2</property>
                               <property name="row">0</property>
                             </layout>
                           </object>
@@ -111,6 +113,8 @@
                             <property name="width">10</property>
                             <layout manager="grid">
                               <property name="column">0</property>
+                              <property name="padx">2</property>
+                              <property name="pady">2</property>
                               <property name="row">1</property>
                             </layout>
                           </object>
@@ -122,6 +126,8 @@
                             <property name="width">10</property>
                             <layout manager="grid">
                               <property name="column">0</property>
+                              <property name="padx">2</property>
+                              <property name="pady">2</property>
                               <property name="row">2</property>
                             </layout>
                           </object>
@@ -133,6 +139,8 @@
                             <property name="width">10</property>
                             <layout manager="grid">
                               <property name="column">0</property>
+                              <property name="padx">2</property>
+                              <property name="pady">2</property>
                               <property name="row">3</property>
                             </layout>
                           </object>
@@ -186,6 +194,7 @@
                         </layout>
                         <child>
                           <object class="pygubu.forms.ttkwidget.Entry" id="entry5">
+                            <property name="textvariable">string:layerstr</property>
                             <layout manager="grid">
                               <property name="column">1</property>
                               <property name="row">1</property>
@@ -205,6 +214,7 @@
                         </child>
                         <child>
                           <object class="pygubu.forms.ttkwidget.Entry" id="entry6">
+                            <property name="textvariable">string:kernelsize</property>
                             <layout manager="grid">
                               <property name="column">1</property>
                               <property name="row">2</property>
@@ -254,6 +264,7 @@
                         </child>
                         <child>
                           <object class="pygubu.forms.ttkwidget.Entry" id="entry8">
+                            <property name="textvariable">string:modelname</property>
                             <layout manager="grid">
                               <property name="column">1</property>
                               <property name="row">3</property>
@@ -286,9 +297,11 @@
                     </layout>
                     <child>
                       <object class="ttk.Entry" id="entry1">
+                        <property name="textvariable">string:gamma</property>
                         <property name="width">5</property>
                         <layout manager="grid">
                           <property name="column">1</property>
+                          <property name="pady">2</property>
                           <property name="row">1</property>
                           <property name="sticky">w</property>
                         </layout>
@@ -297,9 +310,11 @@
                     <child>
                       <object class="ttk.Entry" id="entry2">
                         <property name="text" translatable="yes">0.1</property>
+                        <property name="textvariable">string:gammabig</property>
                         <property name="width">5</property>
                         <layout manager="grid">
                           <property name="column">1</property>
+                          <property name="pady">2</property>
                           <property name="row">2</property>
                           <property name="sticky">w</property>
                         </layout>
@@ -307,9 +322,11 @@
                     </child>
                     <child>
                       <object class="ttk.Entry" id="entry3">
+                        <property name="textvariable">string:channel</property>
                         <property name="width">5</property>
                         <layout manager="grid">
                           <property name="column">1</property>
+                          <property name="pady">2</property>
                           <property name="row">4</property>
                           <property name="sticky">w</property>
                         </layout>
@@ -320,6 +337,7 @@
                         <property name="width">5</property>
                         <layout manager="grid">
                           <property name="column">1</property>
+                          <property name="pady">2</property>
                           <property name="row">5</property>
                           <property name="sticky">w</property>
                         </layout>
@@ -391,9 +409,12 @@
                     </child>
                     <child>
                       <object class="ttk.Entry" id="entry7">
+                        <property name="text" translatable="yes">128</property>
+                        <property name="textvariable">string:grav</property>
                         <property name="width">5</property>
                         <layout manager="grid">
                           <property name="column">1</property>
+                          <property name="pady">2</property>
                           <property name="row">0</property>
                           <property name="sticky">w</property>
                         </layout>
@@ -529,11 +550,11 @@
                 <child>
                   <object class="ttk.Frame" id="frmTree" named="True">
                     <property name="height">200</property>
-                    <property name="width">200</property>
+                    <property name="width">400</property>
                     <layout manager="grid">
                       <property name="column">0</property>
                       <property name="row">0</property>
-                      <property name="sticky">w</property>
+                      <property name="sticky">nsew</property>
                     </layout>
                     <child>
                       <object class="ttk.Treeview" id="treeview1">
@@ -549,12 +570,11 @@
                           <object class="ttk.Treeview.Column" id="column1">
                             <property name="column_anchor">w</property>
                             <property name="heading_anchor">w</property>
-                            <property name="minwidth">20</property>
                             <property name="stretch">false</property>
                             <property name="text" translatable="yes">场景名</property>
                             <property name="tree_column">false</property>
                             <property name="visible">true</property>
-                            <property name="width">10</property>
+                            <property name="width">80</property>
                           </object>
                         </child>
                         <child>
@@ -563,10 +583,10 @@
                             <property name="heading_anchor">w</property>
                             <property name="minwidth">20</property>
                             <property name="stretch">true</property>
-                            <property name="text" translatable="yes">npy缓存状态</property>
+                            <property name="text" translatable="yes">粒子缓存状态(npy)</property>
                             <property name="tree_column">false</property>
                             <property name="visible">true</property>
-                            <property name="width">50</property>
+                            <property name="width">130</property>
                           </object>
                         </child>
                         <child>
@@ -579,6 +599,30 @@
                             <property name="tree_column">false</property>
                             <property name="visible">true</property>
                             <property name="width">50</property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="ttk.Treeview.Column" id="column4">
+                            <property name="column_anchor">w</property>
+                            <property name="heading_anchor">w</property>
+                            <property name="minwidth">20</property>
+                            <property name="stretch">true</property>
+                            <property name="text" translatable="yes">流体1</property>
+                            <property name="tree_column">false</property>
+                            <property name="visible">true</property>
+                            <property name="width">50</property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="ttk.Treeview.Column" id="column5">
+                            <property name="column_anchor">w</property>
+                            <property name="heading_anchor">w</property>
+                            <property name="minwidth">20</property>
+                            <property name="stretch">true</property>
+                            <property name="text" translatable="yes">Json状态</property>
+                            <property name="tree_column">false</property>
+                            <property name="visible">true</property>
+                            <property name="width">200</property>
                           </object>
                         </child>
                       </object>
@@ -608,7 +652,46 @@
                         <property name="length">300</property>
                         <property name="maximum">100</property>
                         <property name="orient">horizontal</property>
-                        <property name="value">30</property>
+                        <property name="value">100</property>
+                        <layout manager="grid">
+                          <property name="column">1</property>
+                          <property name="row">0</property>
+                        </layout>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="ttk.Labelframe" id="optimizer" named="True">
+                    <property name="height">200</property>
+                    <property name="text" translatable="yes">优化器
+</property>
+                    <property name="width">200</property>
+                    <layout manager="grid">
+                      <property name="column">1</property>
+                      <property name="row">2</property>
+                    </layout>
+                    <child>
+                      <object class="ttk.Label" id="label11">
+                        <property name="text" translatable="yes">学习率</property>
+                        <layout manager="grid">
+                          <property name="column">0</property>
+                          <property name="row">0</property>
+                        </layout>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="ttk.Label" id="label12">
+                        <property name="text" translatable="yes">早停损失</property>
+                        <layout manager="grid">
+                          <property name="column">0</property>
+                          <property name="row">1</property>
+                        </layout>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="ttk.Entry" id="entry9">
+                        <property name="width">5</property>
                         <layout manager="grid">
                           <property name="column">1</property>
                           <property name="row">0</property>
@@ -723,7 +806,7 @@
               <object class="ttk.Label" id="imgvor" named="True">
                 <property name="text" translatable="yes">PIC VIEW
 </property>
-                <property name="width">200</property>
+                <property name="width">100</property>
                 <layout manager="grid">
                   <property name="column">0</property>
                   <property name="row">0</property>
@@ -734,9 +817,29 @@
               <object class="ttk.Label" id="imgwin" named="True">
                 <property name="text" translatable="yes">PIC VIEW
 </property>
-                <property name="width">200</property>
+                <property name="width">100</property>
                 <layout manager="grid">
                   <property name="column">0</property>
+                  <property name="row">1</property>
+                </layout>
+              </object>
+            </child>
+            <child>
+              <object class="ttk.Label" id="imgstr" named="True">
+                <property name="text" translatable="yes">label13</property>
+                <property name="width">100</property>
+                <layout manager="grid">
+                  <property name="column">1</property>
+                  <property name="row">0</property>
+                </layout>
+              </object>
+            </child>
+            <child>
+              <object class="ttk.Label" id="imgqc" named="True">
+                <property name="text" translatable="yes">label16</property>
+                <property name="width">100</property>
+                <layout manager="grid">
+                  <property name="column">1</property>
                   <property name="row">1</property>
                 </layout>
               </object>
